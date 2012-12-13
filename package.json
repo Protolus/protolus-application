@@ -1,0 +1,33 @@
+{
+    "name": "protolus-application",
+    "homepage": "https://github.com/Protolus/protolus-application",
+    "version": "0.0.1-alpha",
+    "main": "protolus-application.js",
+    "description": "A thin wrapper for web delivery with protolus",
+    "keywords": [
+        "web",
+        "protolus"
+    ],
+    "author": "Abbey Hawk Sparrow <@khrome> (http://patternweaver.com)",
+    "contributors": [],
+    "bugs": {
+        "url": "https://github.com/Protolus/protolus-application/issues"
+    },
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "git://github.com/Protolus/protolus-application.git"
+    },
+    "dependencies": {
+        "prime": "*",
+        "Classy":"*"
+    },
+    "devDependencies": {
+        "mocha": "*",
+        "should": "*"
+    },
+    "optionalDependencies": {},
+    "engines": {
+        "node": "*"
+    }
+}
