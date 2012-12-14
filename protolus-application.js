@@ -54,6 +54,13 @@ prime.values = function(object){
     for(var key in object) result.push(object[key]);
     return result;
 };
+prime.interleave = function(data, object){
+    prime.each(data, function(item, key){
+        if(type(item) == 'object' && type(object[key]) == 'object') object[key] = prime.interleave(item, object[key]);
+        else object[key] = item;
+    });
+    return prime.clone(object);
+};
 prime.clone = function(obj){
     var result;
     switch(type(obj)){
@@ -106,9 +113,79 @@ var Options = new Class({
     }
 });
 
+var EnhancedEmitter = prime({
+    inherits: Emitter,
+    once : function(type, fn){
+        var ob = this;
+        function cb(){
+            ob.off(type, cb);
+            fn();
+        }
+        this.on(type, cb);
+    }
+});
+
+var InternalWorker = prime({
+    working: 0,
+    deferredWork : [],
+    ready : function(){
+        return !(this.working > 0);
+    },
+    addJob : function(job){
+        this.working++;
+    },
+    removeJob : function(job){
+        this.working--;
+        if(this.working == 0 && this.deferredWork.length > 0){ //flush the queue
+            var queue = this.deferredWork;
+            this.deferredWork =[];
+            array.forEach(queue, function(callback){
+                callback();
+            });
+        }
+        if(this.emit) this.emit('ready');
+    },
+    whenReady : function(callback){
+        if(!this.ready()){
+            this.deferredWork.push(callback);
+        }else callback();
+    }
+});
+
+var Configurable = new Class({
+    configurations : {application: {extra:'fun'}},
+    getConfiguration : function(key){
+        var parts = key.split('.');
+        var current = this.configurations;
+        while(parts.length > 0){
+            current = current[parts.shift()];
+            if(!current) return undefined;
+        }
+        return current;
+    },
+    setConfiguration : function(key, value){
+        var parts = key.split('.');
+        var current = this.configurations;
+        while(parts.length > 0){
+            var part = parts.shift();
+            if(!current[part]) current[part] = {};
+            current = current[part];
+        }
+        current = value;
+    },
+    loadConfiguration : function(file, callback){
+        fs.readFile(file, 'utf8', fn.bind(function(err, data){
+            if(err) throw('Cannot find configuration file');
+            data = JSON.parse(data);
+            data = prime.interleave(data, this.configurations);
+            callback(data);
+        }, this));
+    }
+});
+
 var Application = {};
 Application.HTTP = new Class({
-    Implements : [Options],
+    Implements : [Options, EnhancedEmitter, InternalWorker],
     initialize : function(options){
         if(!options.passthru) options.passthru = [];
         var interface = (options.ssl && (options.ssl.pfx || options.ssl.key && options.ssl.certificate))?require('https'):require('http');
@@ -127,6 +204,10 @@ Application.HTTP = new Class({
         }, this);
         this.setOptions(options);
         this.server = require('http').createServer(handler);
+        this.addJob();
+        this.server.on("listening", fn.bind(function(){
+            this.removeJob();
+        }, this));
         if(options.onListening) this.server.on("listening", options.onListening);
         if(
             (options.ssl && (
@@ -134,12 +215,15 @@ Application.HTTP = new Class({
             ))
         ) this.secure = require('https').createServer(handler);
     },
-    start : function(){
+    start : function(callback){
+        if(callback) this.whenReady(callback);
         if(this.server) this.server.listen(this.options.port || 80);
         if(this.secure) this.secure.listen(this.options.port || 80);
         return this;
     },
-    stop : function(){
+    stop : function(callback){
+        //if(callback) this.whenReady(callback);
+        //if(callback) this.once('stopped', callback);
         if(this.server) this.server.close();
         if(this.secure) this.secure.close();
         return this;
@@ -148,6 +232,7 @@ Application.HTTP = new Class({
 
 Application.WebServer = new Class({
     Extends : Application.HTTP,
+    Implements : [Configurable],
     initialize : function(options){
         if(!options.passthru) options.passthru = [];
         if(options.onServe){
