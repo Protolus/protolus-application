@@ -1,187 +1,18 @@
 //todo: events support
-var prime = require('prime');
+var ext = require('prime-ext');
+var prime = ext(require('prime'));
 var Class = require('Classy');
 var type = require('prime/util/type');
 var string = require('prime/es5/string');
-var array = require('prime/es5/array');
-array.forEachEmission = function(collection, callback, complete){ //one at a time
-    var a = {count : 0};
-    var fn = function(collection, callback, complete){
-        if(a.count >= collection.length){
-            if(complete) complete();
-        }else{
-            callback(collection[a.count], a.count, function(){
-                a.count++;
-                fn(collection, callback, complete);
-            });
-        }
-    };
-    fn(collection, callback, complete);
-};
-array.forAllEmissions = function(collection, callback, complete){ //parallel
-    var a = {count : 0};
-    var begin = function(){
-        a.count++;
-    };
-    var finish = function(){
-        a.count--;
-        if(a.count == 0 && complete) complete();
-    };
-    array.forEach(collection, function(value, key){
-        begin();
-        callback(value, key, function(){
-           finish(); 
-        });
-    });
-};
-array.combine = function(thisArray, thatArray){ //parallel
-    var result = [];
-    array.forEach(thatArray, function(value, key){
-        result.push(value);
-    });
-    return result;
-};
-array.contains = function(haystack, needle){ //parallel
-    return haystack.indexOf(needle) != -1;
-};
-prime.keys = function(object){
-    var result = [];
-    for(var key in object) result.push(key);
-    return result;
-};
-prime.values = function(object){
-    var result = [];
-    for(var key in object) result.push(object[key]);
-    return result;
-};
-prime.interleave = function(data, object){
-    prime.each(data, function(item, key){
-        if(type(item) == 'object' && type(object[key]) == 'object') object[key] = prime.interleave(item, object[key]);
-        else object[key] = item;
-    });
-    return prime.clone(object);
-};
-prime.clone = function(obj){
-    var result;
-    switch(type(obj)){
-        case 'object':
-            result = {};
-            for(var key in obj){
-                result[key] = prime.clone(obj[key]);
-            }
-            break;
-        case 'array':
-            result = obj.slice(0);
-            break;
-        default : result = obj;
-    }
-    return result;
-};
-prime.merge = function(objOne, objTwo){
-    var result = {};
-    prime.forEach(objOne, function(item, key){
-        result[key] = item;
-    });
-    prime.forEach(objTwo, function(item, key){
-        if(!result[key]) result[key] = item;
-    });
-    return result;
-};
-string.startsWith = function(str, sub){
-    return str.indexOf(sub) === 0; //likely more expensive than needed
-};
-string.endsWith = function(str, sub){
-    return str.substring(str.length-sub.length) === sub;
-};
+var array = ext(require('prime/es5/array'));
 var fn = require('prime/es5/function');
 var regexp = require('prime/es5/regexp');
 var Emitter = require('prime/util/emitter');
 var fs = require('fs');
-
-var Options = new Class({
-    setOptions : function(options){
-        if(!this.options) this.options = {};
-        var value;
-        for(var key in options){
-            value = options[key];
-            if(this.on && key.substring(0,2) == 'on' && key.substring(2,3) == key.substring(2,3).toUpperCase()){
-                var event = key.substring(2,3).toLowerCase()+key.substring(3);
-                this.on(event, value);
-            }
-            this.options[key] = value;
-        }
-    }
-});
-
-var EnhancedEmitter = prime({
-    inherits: Emitter,
-    once : function(type, fn){
-        var ob = this;
-        function cb(){
-            ob.off(type, cb);
-            fn();
-        }
-        this.on(type, cb);
-    }
-});
-
-var InternalWorker = prime({
-    working: 0,
-    deferredWork : [],
-    ready : function(){
-        return !(this.working > 0);
-    },
-    addJob : function(job){
-        this.working++;
-    },
-    removeJob : function(job){
-        this.working--;
-        if(this.working == 0 && this.deferredWork.length > 0){ //flush the queue
-            var queue = this.deferredWork;
-            this.deferredWork =[];
-            array.forEach(queue, function(callback){
-                callback();
-            });
-        }
-        if(this.emit) this.emit('ready');
-    },
-    whenReady : function(callback){
-        if(!this.ready()){
-            this.deferredWork.push(callback);
-        }else callback();
-    }
-});
-
-var Configurable = new Class({
-    configurations : {application: {extra:'fun'}},
-    getConfiguration : function(key){
-        var parts = key.split('.');
-        var current = this.configurations;
-        while(parts.length > 0){
-            current = current[parts.shift()];
-            if(!current) return undefined;
-        }
-        return current;
-    },
-    setConfiguration : function(key, value){
-        var parts = key.split('.');
-        var current = this.configurations;
-        while(parts.length > 0){
-            var part = parts.shift();
-            if(!current[part]) current[part] = {};
-            current = current[part];
-        }
-        current = value;
-    },
-    loadConfiguration : function(file, callback){
-        fs.readFile(file, 'utf8', fn.bind(function(err, data){
-            if(err) throw('Cannot find configuration file');
-            data = JSON.parse(data);
-            data = prime.interleave(data, this.configurations);
-            callback(data);
-        }, this));
-    }
-});
+var EnhancedEmitter = require('prime-ext/emitter-ext');
+var InternalWorker = require('prime-ext/internal-worker');
+var Configurable = require('prime-ext/configurable');
+var Options = require('prime-ext/options');
 
 var Application = {};
 Application.HTTP = new Class({
@@ -216,7 +47,12 @@ Application.HTTP = new Class({
         ) this.secure = require('https').createServer(handler);
     },
     start : function(callback){
-        if(callback) this.whenReady(callback);
+        if(callback){
+            var that = this;
+            this.whenReady(function(){
+                callback(that);
+            });
+        }
         if(this.server) this.server.listen(this.options.port || 80);
         if(this.secure) this.secure.listen(this.options.port || 80);
         return this;
@@ -227,7 +63,27 @@ Application.HTTP = new Class({
         if(this.server) this.server.close();
         if(this.secure) this.secure.close();
         return this;
-    } 
+    } ,
+    openSocket : function(port, callback){ //todo: fix me so I can be lazy about connecting
+        var io = require('socket.io').listen(port || this.server);
+        //todo: secure sockets?
+        //io.listen(port || this.server);
+        //io.set('log level', 1);
+        this.addJob();
+        io.set('log level', 1);
+        io.sockets.on('connection', fn.bind(function (socket) {
+            this.socket = socket;
+            this.removeJob();
+            if(callback) callback(socket);
+        }, this));
+    },
+    addEvent : function(name, callback){
+        this.whenReady(fn.bind(function(){
+            //todo: maybe auto open
+            if(!this.socket) throw('openSocket() must be called before attempting to add events');
+            this.socket.on(name, callback);
+        }, this));
+    }
 });
 
 Application.WebServer = new Class({
