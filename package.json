@@ -1,7 +1,7 @@
 {
     "name": "protolus-application",
     "homepage": "https://github.com/Protolus/protolus-application",
-    "version": "0.0.4-alpha",
+    "version": "0.0.5-alpha",
     "main": "protolus-application.js",
     "description": "A thin wrapper for web delivery with protolus",
     "keywords": [
@@ -21,7 +21,8 @@
     "dependencies": {
         "prime": "0.0.5-alpha",
         "Classy":"*",
-        "prime-ext": "*"
+        "prime-ext": "*",
+        "querystring":"*"
     },
     "devDependencies": {
         "mocha": "*",

@@ -13,25 +13,82 @@ var EnhancedEmitter = require('prime-ext/emitter-ext');
 var InternalWorker = require('prime-ext/internal-worker');
 var Configurable = require('prime-ext/configurable');
 var Options = require('prime-ext/options');
+var qs = require('querystring');
+var Cookies = require('cookies');
 
 var Application = {};
+Application.Connection = prime({
+    constructor : function(request, response){
+        this.request = request;
+        this.cookies = new Cookies(request, response);
+    },
+    getCookie : function(name){
+        return this.cookies.get(name);
+    },
+    setCookie : function(name, value){
+        return this.cookies.set(name, value);
+    },
+    getSession : function(name){
+        return undefined;
+    },
+    setSession : function(name, value){
+        
+    },
+    getPost : function(name){
+        return this.request.post[name];
+    },
+    setPost : function(name, value){
+        this.request.post[name] = value;
+    },
+    getGet : function(){
+        return this.request.get[name];
+    },
+    setGet : function(){
+        this.request.get[name] = value;
+    },
+});
 Application.HTTP = new Class({
     Implements : [Options, EnhancedEmitter, InternalWorker],
     initialize : function(options){
         if(!options.passthru) options.passthru = [];
         var interface = (options.ssl && (options.ssl.pfx || options.ssl.key && options.ssl.certificate))?require('https'):require('http');
         var handler = fn.bind(function(request, response) {
-            var url = require('url');
-            var uri = url.parse(request.url, true);
-            var type = uri.pathname.lastIndexOf('.') != -1 ? uri.pathname.substring(uri.pathname.lastIndexOf('.')+1) : '!';
-            var path = uri.pathname;
-            type = path.lastIndexOf('.') != -1 ? path.substring(path.lastIndexOf('.')+1) : '!';
-            request.parts = {
-                path : path,
-                type : type,
-                url : uri
+            try{
+                request.setEncoding("utf8");
+                request.content = '';
+                var random = 1 + Math.floor(Math.random()*1000000);
+                request.addListener("data", function(chunk) {
+                    request.content += chunk;
+                });
+                request.addListener("end", fn.bind(function(){
+                    try{
+                        request.post = qs.parse(request.content);
+                    }catch(ex){
+                        try{
+                            request.post = JSON.stringify(request.content);
+                        }catch(ex){}
+                    }
+                    var url = require('url');
+                    var uri = url.parse(request.url, true);
+                    var type = uri.pathname.lastIndexOf('.') != -1 ? uri.pathname.substring(uri.pathname.lastIndexOf('.')+1) : '!';
+                    var path = uri.pathname;
+                    request.get = uri.query;
+                    type = path.lastIndexOf('.') != -1 ? path.substring(path.lastIndexOf('.')+1) : '!';
+                    request.parts = {
+                        path : path,
+                        type : type,
+                        url : uri
+                    }
+                    var connection = new Application.Connection(request, response);
+                    if(options.onServe) options.onServe(request, response, connection);
+                }, this));
+            }catch(ex){
+                response.writeHead(400, { "Content-Type" : "text/plain" });
+                response.write(JSON.encode({
+                    'error' : ex
+                }));
+                response.end();
             }
-            if(options.onServe) options.onServe(request, response);
         }, this);
         this.setOptions(options);
         this.server = require('http').createServer(handler);
@@ -58,8 +115,6 @@ Application.HTTP = new Class({
         return this;
     },
     stop : function(callback){
-        //if(callback) this.whenReady(callback);
-        //if(callback) this.once('stopped', callback);
         if(this.server) this.server.close();
         if(this.secure) this.secure.close();
         return this;
@@ -93,7 +148,7 @@ Application.WebServer = new Class({
         if(!options.passthru) options.passthru = [];
         if(options.onServe){
             var cb = options.onServe;
-            options.onServe = function(request, response){ //piggyback .onServe
+            options.onServe = function(request, response, connection){ //piggyback .onServe
                 if(array.contains(options.passthru, type)){ //we just ship out a file
                     var fs = require('fs');
                     if(fs.exists(request.parts.url)){
@@ -104,7 +159,7 @@ Application.WebServer = new Class({
                             response.end(fileBody);
                         });
                     }
-                }else if(cb) cb(request, response);
+                }else if(cb) cb(request, response, connection);
             };
         }
         this.parent(options);
