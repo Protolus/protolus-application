@@ -14,13 +14,62 @@ var InternalWorker = require('prime-ext/internal-worker');
 var Configurable = require('prime-ext/configurable');
 var Options = require('prime-ext/options');
 var qs = require('querystring');
+var uuid = require('node-uuid');
 var Cookies = require('cookies');
 
-var Application = {};
+var Application = {
+    name : 'protolus_application',
+    sessionDirectory : '/tmp', //location for file based sessions
+    saveSession : function(key, data, callback){
+        fs.exists(Application.sessionDirectory+'/'+Application.name+'/', function(exists){
+            var doSave = function(){
+                fs.writeFile(Application.sessionDirectory+'/'+Application.name+'/'+key+'.json', 
+                    JSON.stringify(data), 'utf8', 
+                    function(err){
+                        if(err) console.log('ERROR', err);
+                        if(callback) callback(err);
+                    }
+                );
+            };
+            if(!exists){
+                fs.mkdir(Application.sessionDirectory+'/'+Application.name+'/', doSave);
+            } else doSave();
+        });
+    },
+    loadSession : function(key, callback){
+        fs.readFile(Application.sessionDirectory+'/'+Application.name+'/'+key+'.json', 'utf8', 
+            function(err, text){
+                var data = {};
+                if(err) console.log('ERROR', err);
+                try{
+                    data = JSON.parse(text);
+                }catch(ex){
+                    callback(ex, data);
+                    return;
+                }
+                if(callback) callback(err, data);
+            }
+        );
+    },
+    newSessionKey : function(){
+        return uuid.v1();
+    }
+};
 Application.Connection = prime({
-    constructor : function(request, response){
+    session : {},
+    sessionKey : '',
+    constructor : function(request, response, callback){
         this.request = request;
         this.cookies = new Cookies(request, response);
+        var complete = response.end;
+        response.end = fn.bind(function(message){
+            Application.saveSession(this.sessionID(), this.session);
+            complete.apply(response, [message]);
+        }, this);
+        Application.loadSession(this.sessionID(), fn.bind(function(err, session){
+            this.session = session;
+            if(callback) callback(this);
+        }, this));
     },
     getCookie : function(name){
         return this.cookies.get(name);
@@ -29,10 +78,22 @@ Application.Connection = prime({
         return this.cookies.set(name, value);
     },
     getSession : function(name){
-        return undefined;
+        return this.session[name];
+    },
+    sessionID : function(){
+        if(!this.sessionKey){
+            var key = this.getCookie('session_key');
+            if(key){
+                this.sessionKey = key;
+            }else{
+                this.sessionKey = Application.newSessionKey();
+                this.setCookie('session_key', this.sessionKey);
+            }
+        }
+        return this.sessionKey;
     },
     setSession : function(name, value){
-        
+        this.session[name] = value;
     },
     getPost : function(name){
         return this.request.post[name];
@@ -40,12 +101,18 @@ Application.Connection = prime({
     setPost : function(name, value){
         this.request.post[name] = value;
     },
-    getGet : function(){
+    getGet : function(name){
         return this.request.get[name];
     },
-    setGet : function(){
+    setGet : function(name){
         this.request.get[name] = value;
     },
+    get : function(name){
+        return this.request.get[name] || 
+            this.request.post[name] || 
+            this.session[name] || 
+            this.cookies.get(name);
+    }
 });
 Application.HTTP = new Class({
     Implements : [Options, EnhancedEmitter, InternalWorker],
@@ -79,8 +146,11 @@ Application.HTTP = new Class({
                         type : type,
                         url : uri
                     }
-                    var connection = new Application.Connection(request, response);
-                    if(options.onServe) options.onServe(request, response, connection);
+                    new Application.Connection(request, response, fn.bind(function(connection){
+                        if(this.getConfiguration) connection.getConfiguration = this.getConfiguration;
+                        if(this.setConfiguration) connection.setConfiguration = this.setConfiguration;
+                        if(options.onServe) options.onServe(request, response, connection);
+                    }, this));
                 }, this));
             }catch(ex){
                 response.writeHead(400, { "Content-Type" : "text/plain" });
@@ -122,8 +192,6 @@ Application.HTTP = new Class({
     openSocket : function(port, callback){ //todo: fix me so I can be lazy about connecting
         var io = require('socket.io').listen(port || this.server);
         //todo: secure sockets?
-        //io.listen(port || this.server);
-        //io.set('log level', 1);
         this.addJob();
         io.set('log level', 1);
         io.sockets.on('connection', fn.bind(function (socket) {
